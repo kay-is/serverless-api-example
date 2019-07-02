@@ -8,6 +8,7 @@
     "deploy": "sam deploy --template-file packaged.yaml --stack-name serverless-api --capabilities CAPABILITY_IAM",
     "getApiUrl": "aws cloudformation describe-stacks --stack-name serverless-api --query 'Stacks[0].Outputs[?OutputKey==`ApiUrl`].OutputValue' --output text >> api-url",
     "setup": "npm run package && npm run deploy || npm run getApiUrl",
+    "store-api-key": "aws ssm put-parameter --name "/serverless-api/CLARIFAI_API_KEY" --type "SecureString" --value ",
     "test": "node ./test"
   },
   "author": "Kay Plößer",
