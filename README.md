@@ -6,7 +6,7 @@ Example API implementation for [this article](#).
 
 - AWS SDK
 - AWS CLI
-- AWS SAM
+- [AWS SAM](https://github.com/awslabs/serverless-application-model)
 - AWS SAM CLI
 - AWS CloudFormation (via CLI)
 - AWS Lambda
@@ -15,6 +15,7 @@ Example API implementation for [this article](#).
 - AWS Elasticsearch Service
 - AWS Cognito
 - AWS Systems Manager Parameter Store
+- [Clarifai](https://www.clarifai.com/) 
 
 ## Requirements
 
@@ -25,7 +26,7 @@ Example API implementation for [this article](#).
 ## Setup
 
     npm i
-    npm run createDeployBucket
+    npm run createDeployBucket -- s3://<DEPLOYMENT_BUCKET_NAME>
     npm run setup
     npm run store-api-key -- <CLARIFAI_API_KEY>
     
