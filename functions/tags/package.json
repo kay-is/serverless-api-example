@@ -1,0 +1,15 @@
+{
+  "name": "tags",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Kay Plößer",
+  "license": "ISC",
+  "dependencies": {
+    "aws4": "^1.8.0",
+    "clarifai": "^2.9.0"
+  }
+}

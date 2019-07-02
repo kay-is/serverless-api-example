@@ -1,0 +1,260 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Description: "A example REST API build with serverless technology"
+
+Globals:
+
+  # Configuration defaults for all Lambda functions
+  Function:
+    Runtime: nodejs8.10
+    Handler: index.handler
+    Timeout: 30 
+    Tags:
+      Application: Serverless API
+  
+Resources:
+
+  # Explicit API resource needed to configure an authorizer
+  ServerlessApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+      GatewayResponses:
+        # API-Gateway responses are missing CORS headers
+        # They need to be defined in Lambda functions or here
+        UNAUTHORIZED:
+          StatusCode: 401
+          ResponseParameters:
+            Headers:
+              Access-Control-Expose-Headers: "'WWW-Authenticate'"
+              Access-Control-Allow-Origin: "'*'"
+              WWW-Authenticate: >-
+                'Bearer realm="admin"'
+
+  # A simple function that just returns URLs to other endpoints
+  IndexFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/index/
+      Events:
+        Home:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /
+            Method: GET
+            # The following lines disable auth for this event
+            Auth:
+              Authorizer: NONE
+
+  # Lambda function that handles signin and signup with the help of Cognito
+  AuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/auth/
+      # The configuration needed for Cognito usage via AWS SDK
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPool
+          USER_POOL_CLIENT_ID: !Ref UserPoolClient
+      Events:
+        Signup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /signup
+            Method: POST
+            # Endpoint available for unauthorized users
+            Auth:
+              Authorizer: NONE
+        Signin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /signin
+            Method: POST
+            # Endpoint available for unauthorized users
+            Auth:
+              Authorizer: NONE
+
+  # Lambda function that prevents the emission of confirmation emails
+  PreSignupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      InlineCode: |
+        exports.handler = async event => {
+          event.response = { autoConfirmUser: true };
+          return event;
+        };
+
+  # The Cognito user pool that stores our user accounts
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: ApiUserPool
+      LambdaConfig:
+        PreSignUp: !GetAtt PreSignupFunction.Arn
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+
+  # The Cognito user pool client that is used to connect to our user pool
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: ApiUserPoolClient
+      GenerateSecret: no
+
+  # Premission for Cognito to execute our pre-signup Lambda function
+  LambdaCognitoUserPoolExecutionPermission:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt PreSignupFunction.Arn
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPool}'
+
+  # Elasticsearch is used to store the extracted image tags
+  ElasticsearchDomain:
+    Type: AWS::Elasticsearch::Domain
+    Properties:
+      ElasticsearchVersion: "2.3"
+      ElasticsearchClusterConfig:
+        InstanceCount: 1
+        InstanceType: t2.micro.elasticsearch
+      EBSOptions:
+        EBSEnabled: true
+        Iops: 0
+        VolumeSize: 10
+        VolumeType: gp2
+
+  # S3 bucket is used to store the images
+  ImageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      # Configured to be public accessible
+      # So users can directly upload from the browser and
+      # Clarifai can read directly via HTTP
+      AccessControl: PublicRead
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - "*"
+            AllowedMethods:
+              - HEAD
+              - GET
+              - PUT
+              - POST
+            AllowedOrigins:
+              - "*"
+
+  # Public read policy for S3
+  ImageBucketPublicReadPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ImageBucket
+      PolicyDocument:
+        Statement:
+          - Action: s3:GetObject
+            Effect: Allow
+            Principal: "*"
+            Resource: !Join ["", ["arn:aws:s3:::", !Ref "ImageBucket", "/*" ]]
+
+  # Lambda function to handle image URL listing, deletion and the creation
+  # of pre-signed POST upload URLs for direct browser uploads
+  ImageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/images/
+      Policies:
+        - AmazonS3FullAccess # AWS managed policy
+        - ElasticsearchHttpPostPolicy: # AWS SAM policity template
+            DomainName: !Ref ElasticsearchDomain
+      # Config variables for Elasticsearch and S3 access
+      Environment:
+        Variables:
+          IMAGE_BUCKET_NAME: !Ref ImageBucket
+          ELASTICSEARCH_URL: !GetAtt ElasticsearchDomain.DomainEndpoint
+          REGION: !Ref AWS::Region
+      Events:
+        # API-Gateway event for a JSON response of all images
+        ListImages:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /images
+            Method: GET
+        # API-Gateway event to delete one image from Elasticsearch
+        DeleteImage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /images/{imageId}
+            Method: DELETE
+        # API-Gateway event to create a pre-signed POST URL so the users
+        # can directly upload to the S3 bucket
+        CreateImage:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /images
+            Method: POST
+
+  # Lambda function to handle image tagging via the Clarifai API
+  TagsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/tags/
+      Environment:
+        Variables:
+          # The Parameter Store API is used to retrieve the encrypted Clarifai API key
+          # The key here is the Parameter Store key and not the API key
+          PARAMETER_STORE_CLARIFAI_API_KEY: /serverless-api/CLARIFAI_API_KEY_ENC
+          ELASTICSEARCH_URL: !GetAtt ElasticsearchDomain.DomainEndpoint
+          REGION: !Ref AWS::Region
+      Policies:
+        - AmazonS3ReadOnlyAccess # Managed policy
+        - ElasticsearchHttpPostPolicy: # SAM policy template
+            DomainName: !Ref ElasticsearchDomain
+        - Statement: # Inline policy document
+          - Action: [ 'ssm:GetParameter' ]
+            Effect: Allow
+            Resource: '*'
+      Events:
+        # API-Gateway event to list all tags stored in Elasticsearch
+        ListTags:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /tags
+            Method: GET
+        # API-Gateway event to list all images with one tag
+        # Redirects permanently to /images?tags={tagId}
+        ListImages:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ServerlessApi
+            Path: /tags/{tagId}/images
+            Method: GET
+        ExtractTags:
+          Type: S3
+          Properties:
+            Bucket: !Ref ImageBucket
+            Events: s3:ObjectCreated:*
+
+Outputs:
+
+  # When the package.json scripts are used, this output will be stored
+  # inside a api-url file
+  ApiUrl:
+    Description: The target URL of the created API
+    Value: !Sub "https://${ServerlessApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+    Export:
+      Name: ApiUrl
