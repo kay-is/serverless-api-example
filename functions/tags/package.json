@@ -9,7 +9,7 @@
   "author": "Kay Plößer",
   "license": "ISC",
   "dependencies": {
-    "aws4": "^1.8.0",
+    "aws4": "^1.11.0",
     "clarifai": "^2.9.0"
   }
 }
