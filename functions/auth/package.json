@@ -9,7 +9,7 @@
   "author": "Kay Plößer",
   "license": "GPL",
   "dependencies": {
-    "amazon-cognito-identity-js": "^3.0.13",
+    "amazon-cognito-identity-js": "^3.3.3",
     "node-fetch": "^2.6.0"
   }
 }
