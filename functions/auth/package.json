@@ -10,6 +10,6 @@
   "license": "GPL",
   "dependencies": {
     "amazon-cognito-identity-js": "^3.0.13",
-    "node-fetch": "^2.6.0"
+    "node-fetch": "^2.6.7"
   }
 }
